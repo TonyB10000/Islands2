@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Islands Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        #gameCanvas {
+            background-color: #f7fafc; 
+            border-radius: 0.5rem; 
+        }
+        .config-button {
+            padding: 0.5rem 1rem; border-radius: 0.375rem; border: 1px solid #CBD5E0; 
+            background-color: #E2E8F0; color: #4A5568; margin: 0.25rem;
+            transition: background-color 0.2s, color 0.2s, opacity 0.2s; cursor: pointer;
+        }
+        .config-button:hover:not(:disabled) { background-color: #CBD5E0; }
+        .config-button.active { background-color: #4299E1; color: white; border-color: #4299E1; }
+        .config-button:disabled { color: #A0AEC0; cursor: not-allowed; opacity: 0.6; }
+    </style>
+</head>
+<body class="bg-gray-200 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-2xl bg-white shadow-xl rounded-lg p-6">
+        <header class="text-center mb-6">
+            <h1 class="text-4xl font-bold text-gray-800">Islands</h1>
+        </header>
+
+        <div id="gameSetup" class="mb-6 flex flex-col items-center space-y-4">
+             <div class="flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-8">
+                <div>
+                    <h3 class="text-lg font-semibold mb-2 text-gray-700 text-center">Play Mode:</h3>
+                    <div id="playModeButtons" class="flex flex-wrap justify-center">
+                        <button id="modeBattle" class="config-button play-mode-btn">Battle Mode</button>
+                        <button id="modeTraining" class="config-button play-mode-btn">Training Mode</button>
+                    </div>
+                </div>
+                 <div>
+                    <h3 class="text-lg font-semibold mb-2 text-gray-700 text-center">Players:</h3>
+                    <div id="numPlayersButtons" class="flex flex-wrap justify-center">
+                    </div>
+                </div>
+                 <div>
+                    <h3 class="text-lg font-semibold mb-2 text-gray-700 text-center">Opponent:</h3>
+                    <div id="gameModeButtons" class="flex flex-wrap justify-center">
+                        <button id="modeTwoPlayer" class="config-button game-mode-btn">Human</button>
+                        <button id="modeVsAI" class="config-button game-mode-btn">Person vs AI</button>
+                    </div>
+                </div>
+            </div>
+             <div>
+                <h3 class="text-lg font-semibold mb-2 text-gray-700 text-center">Board Size:</h3>
+                <div id="boardSizeButtons" class="flex flex-wrap justify-center"></div>
+            </div>
+            <div>
+                <h3 class="text-lg font-semibold mb-2 text-gray-700 text-center">Min Line Length:</h3>
+                <div id="minLineLengthButtons" class="flex flex-wrap justify-center"></div>
+            </div>
+            <div class="flex items-center mt-4">
+                <button id="startGameButton" class="px-6 py-3 bg-green-500 text-white font-bold rounded-lg hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-300 text-lg">
+                    Start New Game
+                </button>
+                <div id="confirmationArea" class="hidden ml-4 p-2 bg-yellow-100 border border-yellow-300 rounded-lg">
+                    <span class="font-semibold text-gray-800">Are you sure? (Y/N)</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="gameInfo" class="text-center mb-4 text-lg text-gray-700 h-8"></div>
+        <div id="scoreBoard" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 text-gray-700 text-center">
+             <!-- Scoreboard populated by JS -->
+        </div>
+        <div class="flex justify-center">
+            <canvas id="gameCanvas"></canvas>
+        </div>
+        <footer class="text-center mt-6 text-sm text-gray-500">
+            <p>Min Line Length for current game: <span id="minLineLengthDisplay">3</span>.</p>
+            <p id="lastMoveInfo" class="h-4 min-h-[1rem]"></p> 
+            <div id="trainingAnalysis" class="mt-2 text-base text-blue-800 font-semibold min-h-[3rem]"></div>
+            <button id="aiMoveButton" class="hidden mt-2 px-4 py-2 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600">AI can move now</button>
+        </footer>
+    </div>
+
+    <script>
+    window.addEventListener('DOMContentLoaded', () => {
+        // --- Defaults and Options ---
+        const DEFAULT_GRID_SIZE = 19;
+        const DEFAULT_MIN_LINE_LENGTH = 3;
+        const DEFAULT_GAME_MODE = 'human';
+        const DEFAULT_PLAY_MODE = 'battle';
+        const DEFAULT_NUM_PLAYERS = 2;
+        const AI_PLAYER_ID = 2;
+        const BOARD_SIZE_OPTIONS = [17, 18, 19, 20, 21, 22];
+        const LINE_LENGTH_OPTIONS = [3, 4, 5];
+        const NUM_PLAYERS_OPTIONS = [2, 4];
+        const REGION_ANALYSIS_THRESHOLD = 25;
+
+        // --- Drawing and State Constants ---
+        let DOT_RADIUS = 4; let CELL_SIZE; 
+        const DOT_COLOR_EMPTY = '#A0AEC0'; 
+        
+        const PLAYER_COLORS = {
+            1: { line: '#E53E3E', lineDot: '#F56565', highlight: 'rgba(239, 68, 68, 0.4)', name: 'Red' },
+            2: { line: '#3182CE', lineDot: '#4299E1', highlight: 'rgba(59, 130, 246, 0.4)', name: 'Blue' },
+            3: { line: '#D69E2E', lineDot: '#F6E05E', highlight: 'rgba(246, 224, 94, 0.4)', name: 'Yellow' },
+            4: { line: '#874A25', lineDot: '#B7791F', highlight: 'rgba(183, 121, 31, 0.4)', name: 'Brown' }
+        };
+
+        const EMPTY = 0;
+        const ISLAND_STATE_OFFSET = 10;
+        
+        // --- DOM Elements ---
+        const canvas = document.getElementById('gameCanvas'); const ctx = canvas.getContext('2d');
+        const gameInfoElement = document.getElementById('gameInfo'); const scoreBoardElement = document.getElementById('scoreBoard');
+        const minLineLengthDisplay = document.getElementById('minLineLengthDisplay');
+        const lastMoveInfoElement = document.getElementById('lastMoveInfo'); const trainingAnalysisElement = document.getElementById('trainingAnalysis');
+        const aiMoveButton = document.getElementById('aiMoveButton'); const boardSizeButtonsContainer = document.getElementById('boardSizeButtons');
+        const minLineLengthButtonsContainer = document.getElementById('minLineLengthButtons'); const startGameButton = document.getElementById('startGameButton');
+        const modeTwoPlayerButton = document.getElementById('modeTwoPlayer'); const modeVsAIButton = document.getElementById('modeVsAI');
+        const modeBattleButton = document.getElementById('modeBattle'); const modeTrainingButton = document.getElementById('modeTraining');
+        const numPlayersButtonsContainer = document.getElementById('numPlayersButtons');
+        const confirmationArea = document.getElementById('confirmationArea');
+
+
+        // --- Game State Variables ---
+        let currentGridSize, currentMinLineLength, currentGameMode, currentPlayMode, currentNumberOfPlayers;
+        let selectedGridSize = DEFAULT_GRID_SIZE; let selectedMinLineLength = DEFAULT_MIN_LINE_LENGTH;
+        let selectedGameMode = DEFAULT_GAME_MODE; let selectedPlayMode = DEFAULT_PLAY_MODE;
+        let selectedNumberOfPlayers = DEFAULT_NUM_PLAYERS;
+        let boardDots = []; let linesDrawn = []; let currentPlayer = 1;
+        let playerScores = {}; let selectedStartDot = null;
+        let potentialEndDots = []; let isGameOver = false; let gameInProgress = false;
+        let lastAnalysisResult = [];
+        let memo = {}; // Memoization cache for game value calculations
+
+        // --- UI Setup ---
+        function setConfigButtonsDisabledState(disabled) { document.querySelectorAll('.config-button').forEach(btn => { btn.disabled = disabled; }); }
+        function createConfigButtons() {
+            modeBattleButton.addEventListener('click', () => { if (!gameInProgress) { selectedPlayMode = 'battle'; updatePlayModeButtonsUI(); }});
+            modeTrainingButton.addEventListener('click', () => { if (!gameInProgress) { selectedPlayMode = 'training'; updatePlayModeButtonsUI(); }});
+            
+            numPlayersButtonsContainer.innerHTML = '';
+            NUM_PLAYERS_OPTIONS.forEach(num => {
+                const button = document.createElement('button');
+                button.textContent = num;
+                button.classList.add('config-button', 'num-players-btn');
+                button.addEventListener('click', () => {
+                    if (!gameInProgress) {
+                        selectedNumberOfPlayers = num;
+                        updateNumPlayersButtonsUI();
+                    }
+                });
+                numPlayersButtonsContainer.appendChild(button);
+            });
+            
+            modeTwoPlayerButton.addEventListener('click', () => { if (!gameInProgress) { selectedGameMode = 'human'; updateGameModeButtonsUI(); }});
+            modeVsAIButton.addEventListener('click', () => { if (!gameInProgress && selectedNumberOfPlayers === 2) { selectedGameMode = 'ai'; updateGameModeButtonsUI(); }});
+
+            updatePlayModeButtonsUI(); updateNumPlayersButtonsUI();
+
+            boardSizeButtonsContainer.innerHTML = '';
+            BOARD_SIZE_OPTIONS.forEach(size => {
+                const button = document.createElement('button'); button.textContent = size;
+                button.classList.add('config-button', 'board-size-btn'); if (size === selectedGridSize) button.classList.add('active');
+                button.addEventListener('click', () => { if (!gameInProgress) { selectedGridSize = size; document.querySelectorAll('.board-size-btn').forEach(b => b.classList.remove('active')); button.classList.add('active'); } });
+                boardSizeButtonsContainer.appendChild(button);
+            });
+            minLineLengthButtonsContainer.innerHTML = '';
+            LINE_LENGTH_OPTIONS.forEach(length => {
+                const button = document.createElement('button'); button.textContent = length;
+                button.classList.add('config-button', 'line-length-btn'); if (length === selectedMinLineLength) button.classList.add('active');
+                button.addEventListener('click', () => { if (!gameInProgress) { selectedMinLineLength = length; document.querySelectorAll('.line-length-btn').forEach(b => b.classList.remove('active')); button.classList.add('active'); } });
+                minLineLengthButtonsContainer.appendChild(button);
+            });
+        }
+        function updatePlayModeButtonsUI() { modeBattleButton.classList.toggle('active', selectedPlayMode === 'battle'); modeTrainingButton.classList.toggle('active', selectedPlayMode === 'training'); }
+        function updateNumPlayersButtonsUI() {
+            document.querySelectorAll('.num-players-btn').forEach(btn => {
+                btn.classList.toggle('active', parseInt(btn.textContent) === selectedNumberOfPlayers);
+            });
+            if (selectedNumberOfPlayers === 4) {
+                selectedGameMode = 'human';
+                modeVsAIButton.disabled = true;
+                selectedPlayMode = 'battle';
+                modeTrainingButton.disabled = true;
+
+            } else {
+                modeVsAIButton.disabled = false;
+                modeTrainingButton.disabled = false;
+            }
+            updateGameModeButtonsUI();
+            updatePlayModeButtonsUI();
+        }
+        function updateGameModeButtonsUI() { 
+            document.getElementById('modeTwoPlayer').classList.toggle('active', selectedGameMode === 'human'); 
+            document.getElementById('modeVsAI').classList.toggle('active', selectedGameMode === 'ai'); 
+        }
+        
+        // --- Canvas & Drawing ---
+        function setupCanvas() { 
+            const MAX_CANVAS_WIDTH = Math.min(600, window.innerWidth > 0 ? window.innerWidth - 40 : 560);
+            CELL_SIZE = Math.floor(MAX_CANVAS_WIDTH / currentGridSize);
+            DOT_RADIUS = Math.max(2, Math.min(4, Math.floor(CELL_SIZE / 7)));
+            canvas.width = CELL_SIZE * currentGridSize; canvas.height = CELL_SIZE * currentGridSize;
+            canvas.style.cursor = 'pointer';
+        }
+        function initializeBoard() { 
+            boardDots = Array(currentGridSize).fill(null).map(() => Array(currentGridSize).fill(EMPTY));
+            linesDrawn = []; selectedStartDot = null; potentialEndDots = []; isGameOver = false; 
+        }
+        function drawDot(r, c) {
+            const x = c * CELL_SIZE + CELL_SIZE / 2; const y = r * CELL_SIZE + CELL_SIZE / 2;
+            let fillColor = DOT_COLOR_EMPTY; let currentDotDisplayRadius = DOT_RADIUS;
+            
+            const dotState = boardDots[r][c];
+            if (dotState !== EMPTY) {
+                const isIsland = dotState > ISLAND_STATE_OFFSET;
+                const player = isIsland ? dotState - ISLAND_STATE_OFFSET : dotState;
+                if (isIsland) { 
+                    fillColor = PLAYER_COLORS[player].line; 
+                    currentDotDisplayRadius = DOT_RADIUS + 1.5; 
+                } else {
+                    fillColor = PLAYER_COLORS[player].lineDot;
+                }
+            }
+            ctx.beginPath(); ctx.arc(x, y, currentDotDisplayRadius, 0, 2 * Math.PI); ctx.fillStyle = fillColor; ctx.fill();
+        }
+        function drawLines() { 
+            linesDrawn.forEach(line => {
+                const startX = line.start.c * CELL_SIZE + CELL_SIZE / 2; const startY = line.start.r * CELL_SIZE + CELL_SIZE / 2;
+                const endX = line.end.c * CELL_SIZE + CELL_SIZE / 2; const endY = line.end.r * CELL_SIZE + CELL_SIZE / 2;
+                ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(endX, endY);
+                ctx.strokeStyle = PLAYER_COLORS[line.player].line;
+                ctx.lineWidth = Math.max(1, DOT_RADIUS); ctx.lineCap = 'round'; ctx.stroke();
+            });
+        }
+        function drawPotentialEndDots() { 
+             potentialEndDots.forEach(dot => {
+                const x = dot.c * CELL_SIZE + CELL_SIZE / 2; const y = dot.r * CELL_SIZE + CELL_SIZE / 2;
+                ctx.beginPath(); ctx.arc(x, y, DOT_RADIUS + 2, 0, 2 * Math.PI); 
+                ctx.fillStyle = PLAYER_COLORS[currentPlayer].highlight; ctx.fill();
+            });
+        }
+        function drawSelectedStartDot() { 
+            if (selectedStartDot) {
+                const x = selectedStartDot.c * CELL_SIZE + CELL_SIZE / 2; const y = selectedStartDot.r * CELL_SIZE + CELL_SIZE / 2;
+                ctx.beginPath(); ctx.arc(x, y, DOT_RADIUS + 3, 0, 2 * Math.PI);
+                ctx.strokeStyle = PLAYER_COLORS[currentPlayer].line; ctx.lineWidth = 2; ctx.stroke();
+            }
+        }
+        function drawRegionOutlines() {
+            if (currentPlayMode !== 'training' || isGameOver || lastAnalysisResult.length === 0) return;
+            ctx.lineWidth = 2;
+            lastAnalysisResult.forEach(region => {
+                const regionSet = new Set(region.component.map(d => `${d.r},${d.c}`));
+                if (region.capacity === 1) { ctx.setLineDash([]); ctx.strokeStyle = 'black'; } 
+                else { ctx.setLineDash([4, 4]); ctx.strokeStyle = 'black'; }
+                region.component.forEach(dot => {
+                    const x = dot.c * CELL_SIZE + CELL_SIZE / 2; const y = dot.r * CELL_SIZE + CELL_SIZE / 2;
+                    if (!regionSet.has(`${dot.r-1},${dot.c}`)) { ctx.beginPath(); ctx.moveTo(x - CELL_SIZE/2, y - CELL_SIZE/2); ctx.lineTo(x + CELL_SIZE/2, y - CELL_SIZE/2); ctx.stroke(); }
+                    if (!regionSet.has(`${dot.r+1},${dot.c}`)) { ctx.beginPath(); ctx.moveTo(x - CELL_SIZE/2, y + CELL_SIZE/2); ctx.lineTo(x + CELL_SIZE/2, y + CELL_SIZE/2); ctx.stroke(); }
+                    if (!regionSet.has(`${dot.r},${dot.c-1}`)) { ctx.beginPath(); ctx.moveTo(x - CELL_SIZE/2, y - CELL_SIZE/2); ctx.lineTo(x - CELL_SIZE/2, y + CELL_SIZE/2); ctx.stroke(); }
+                    if (!regionSet.has(`${dot.r},${dot.c+1}`)) { ctx.beginPath(); ctx.moveTo(x + CELL_SIZE/2, y - CELL_SIZE/2); ctx.lineTo(x + CELL_SIZE/2, y + CELL_SIZE/2); ctx.stroke(); }
+                });
+            });
+            ctx.setLineDash([]);
+        }
+        function redrawBoard() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let r_idx = 0; r_idx < currentGridSize; r_idx++) {
+                for (let c_idx = 0; c_idx < currentGridSize; c_idx++) {
+                    drawDot(r_idx, c_idx);
+                }
+            }
+            drawLines(); 
+            drawRegionOutlines();
+            if (selectedStartDot && !isGameOver && !(currentGameMode === 'ai' && currentPlayer === AI_PLAYER_ID)) {
+                drawSelectedStartDot();
+                drawPotentialEndDots(); 
+            }
+        }
+
+        // --- Core Game Logic & Helpers ---
+        function updateGameInfo() { 
+            if (isGameOver) return; 
+            const playerName = PLAYER_COLORS[currentPlayer].name;
+            const aiTag = (currentGameMode === 'ai' && currentPlayer === AI_PLAYER_ID) ? " (AI)" : "";
+            gameInfoElement.textContent = `${playerName}'s Turn${aiTag}`;
+        }
+        function updateScores() { 
+            scoreBoardElement.innerHTML = '';
+            for (let i = 1; i <= currentNumberOfPlayers; i++) {
+                const scoreDiv = document.createElement('div');
+                scoreDiv.classList.add('text-xl');
+                scoreDiv.style.color = PLAYER_COLORS[i].line;
+                scoreDiv.textContent = `${PLAYER_COLORS[i].name}: ${playerScores[i]}`;
+                scoreBoardElement.appendChild(scoreDiv);
+            }
+        }
+        function getDotsOnLine(start, end) { 
+            const dots = []; const dr = Math.sign(end.r - start.r); const dc = Math.sign(end.c - start.c);
+            let r_path = start.r; let c_path = start.c;
+            while (true) { dots.push({ r: r_path, c: c_path }); if (r_path === end.r && c_path === end.c) break; r_path += dr; c_path += dc; }
+            return dots;
+        }
+        function segmentsIntersect(p1, q1, p2, q2) {
+            function orientation(p, q, r) {
+                const val = (q.c - p.c) * (r.r - q.r) - (q.r - p.r) * (r.c - q.c);
+                if (val === 0) return 0;
+                return (val > 0) ? 1 : 2;
+            }
+            function onSegment(p, q, r) {
+                return (q.r <= Math.max(p.r, r.r) && q.r >= Math.min(p.r, r.r) &&
+                        q.c <= Math.max(p.c, r.c) && q.c >= Math.min(p.c, r.c));
+            }
+            const o1 = orientation(p1, q1, p2);
+            const o2 = orientation(p1, q1, q2);
+            const o3 = orientation(p2, q2, p1);
+            const o4 = orientation(p2, q2, q1);
+            if (o1 !== 0 && o2 !== 0 && o3 !== 0 && o4 !== 0) {
+                if (o1 !== o2 && o3 !== o4) return true;
+            }
+            if (o1 === 0 && onSegment(p1, p2, q1)) return true;
+            if (o2 === 0 && onSegment(p1, q2, q1)) return true;
+            if (o3 === 0 && onSegment(p2, p1, q2)) return true;
+            if (o4 === 0 && onSegment(p2, q1, q2)) return true;
+            return false;
+        }
+        function calculatePotentialEndDots_param(startDot, boardState, linesToCheck) {
+            const candidates = []; const directions = [{r:0,c:1},{r:0,c:-1},{r:1,c:0},{r:-1,c:0},{r:1,c:1},{r:1,c:-1},{r:-1,c:1},{r:-1,c:-1}];
+            directions.forEach(dir => {
+                for (let lengthIndex = currentMinLineLength - 1; lengthIndex < currentGridSize; lengthIndex++) {
+                    const endR = startDot.r + dir.r * lengthIndex; const endC = startDot.c + dir.c * lengthIndex;
+                    if (endR < 0 || endR >= currentGridSize || endC < 0 || endC >= currentGridSize) break; 
+                    const path = getDotsOnLine({r:startDot.r, c:startDot.c}, {r:endR, c:endC}); 
+                    let pathEmpty = true;
+                    for(const dot of path) { if(boardState[dot.r][dot.c] !== EMPTY) { pathEmpty = false; break; } }
+                    if (!pathEmpty) break;
+                    let intersects = false; const segment = {start:{r:startDot.r, c:startDot.c}, end:{r:endR, c:endC}};
+                    for (const line of linesToCheck) { if (segmentsIntersect(segment.start, segment.end, {r:line.start.r, c:line.start.c}, {r:line.end.r, c:line.end.c})) { intersects = true; break; } }
+                    if (!intersects) candidates.push({ r: endR, c: endC });
+                } 
+            }); 
+            return candidates;
+        }
+        function canLinePassThroughDot_param(r_test, c_test, boardState, linesToCheck) {
+            const testDot = { r: r_test, c: c_test }; const directions = [{r:0,c:1},{r:0,c:-1},{r:1,c:0},{r:-1,c:0},{r:1,c:1},{r:1,c:-1},{r:-1,c:1},{r:-1,c:-1}];
+            for (const dir of directions) { 
+                for (let i = 0; i < currentMinLineLength; i++) { 
+                    const startR = testDot.r - dir.r * i; const startC = testDot.c - dir.c * i;
+                    const endR = testDot.r + dir.r * (currentMinLineLength - 1 - i); const endC = testDot.c + dir.c * (currentMinLineLength - 1 - i);
+                    if (startR<0||startR>=currentGridSize||startC<0||startC>=currentGridSize||endR<0||endR>=currentGridSize||endC<0||endC>=currentGridSize) continue;
+                    const pathDots = getDotsOnLine({r:startR,c:startC},{r:endR,c:endC}); let pathValid = true;
+                    for(const dot of pathDots) { if(!(dot.r===testDot.r&&dot.c===testDot.c)&&boardState[dot.r][dot.c]!==EMPTY) { pathValid = false; break; } }
+                    if(!pathValid) continue;
+                    const proposedSegment = {start:{r:startR,c:startC},end:{r:endR,c:endC}}; let intersects = false;
+                    for (const line of linesToCheck) { if(segmentsIntersect(proposedSegment.start,proposedSegment.end,{r:line.start.r, c:line.start.c},{r:line.end.r, c:line.end.c})) { intersects = true; break; } }
+                    if(!intersects) return true; 
+                }
+            } return false; 
+        }
+        function findConnectedComponentsOfIslandCandidates_param(candidateDotsList) {
+            const components = []; const visited = Array(currentGridSize).fill(null).map(() => Array(currentGridSize).fill(false));
+            const candidateSet = new Set(candidateDotsList.map(d => `${d.r},${d.c}`)); 
+            const dirs = [{r:0,c:1},{r:0,c:-1},{r:1,c:0},{r:-1,c:0},{r:1,c:1},{r:1,c:-1},{r:-1,c:1},{r:-1,c:-1}];
+            for (const startNode of candidateDotsList) {
+                if (candidateSet.has(`${startNode.r},${startNode.c}`) && !visited[startNode.r][startNode.c]) { 
+                    const component = []; const q = [startNode]; visited[startNode.r][startNode.c] = true;
+                    while (q.length>0) { const curr = q.shift(); component.push(curr);
+                        for(const dir of dirs) { const nr = curr.r + dir.r; const nc = curr.c + dir.c;
+                            if (nr>=0&&nr<currentGridSize&&nc>=0&&nc<currentGridSize && candidateSet.has(`${nr},${nc}`) && !visited[nr][nc]) { 
+                                visited[nr][nc] = true; q.push({r:nr, c:nc});
+                            }
+                        }
+                    }
+                    if (component.length > 0) components.push(component);
+                }
+            } return components;
+        }
+        function detectAndScoreIslands_MAIN(playerWhoMadeMove) {
+            const islandCandidates = [];
+            for (let r=0;r<currentGridSize;r++) for(let c=0;c<currentGridSize;c++) if(boardDots[r][c]===EMPTY&&!canLinePassThroughDot_param(r,c,boardDots,linesDrawn)) islandCandidates.push({r,c});
+            if (islandCandidates.length===0){lastMoveInfoElement.textContent="";return;}
+            const islandComponents = findConnectedComponentsOfIslandCandidates_param(islandCandidates);
+            let pts=0;const playerName=PLAYER_COLORS[playerWhoMadeMove].name;
+            const islandState = playerWhoMadeMove + ISLAND_STATE_OFFSET; 
+            islandComponents.forEach(c=>{pts+=c.length;c.forEach(d=>{boardDots[d.r][d.c]=islandState;});});
+            if(pts>0){playerScores[playerWhoMadeMove]+=pts;lastMoveInfoElement.textContent=`${playerName} scored ${pts} island points!`;}else{lastMoveInfoElement.textContent="";}
+        }
+        
+        // --- AI and Game Flow ---
+        function calculateRegionGameValue(component, boardState, linesToCheck) {
+            if (component.length > REGION_ANALYSIS_THRESHOLD) return 2;
+            const componentKey = component.map(d => `${d.r},${d.c}`).sort().join('|');
+            if (memo[componentKey] !== undefined) return memo[componentKey];
+
+            const possibleMoves = getAllPossibleMovesInComponent(component, boardState, linesToCheck);
+            if (possibleMoves.length === 0) return 0;
+
+            let maxTurns = 0;
+            for (const move of possibleMoves) {
+                let tempBoard = boardState.map(row => [...row]);
+                const tempLines = [...linesToCheck, {start: move.start, end: move.end, player: 0}];
+                getDotsOnLine(move.start, move.end).forEach(d => tempBoard[d.r][d.c] = 99);
+
+                const remainingEmptyDots = component.filter(d => tempBoard[d.r][d.c] === EMPTY);
+                if (remainingEmptyDots.length === 0) {
+                    maxTurns = Math.max(maxTurns, 1);
+                    continue;
+                }
+                
+                const subRegions = findConnectedComponentsOfIslandCandidates_param(remainingEmptyDots);
+                let subGameValue = 0;
+                for (const subRegion of subRegions) {
+                    subGameValue += calculateRegionGameValue(subRegion, tempBoard, tempLines);
+                }
+                maxTurns = Math.max(maxTurns, 1 + subGameValue);
+            }
+            memo[componentKey] = maxTurns;
+            return maxTurns;
+        }
+        function getAllPossibleMovesInComponent(component, boardState, linesToCheck) {
+            const internalMoves = [];
+            const componentSet = new Set(component.map(d => `${d.r},${d.c}`));
+            const uniqueMoveKeys = new Set();
+            for(const startDot of component) {
+                const ends = calculatePotentialEndDots_param(startDot, boardState, linesToCheck)
+                                .filter(end => componentSet.has(`${end.r},${end.c}`));
+                ends.forEach(end => {
+                    let p1 = startDot; let p2 = end;
+                    if (p1.r > p2.r || (p1.r === p2.r && p1.c > p2.c)) {[p1, p2] = [p2, p1];}
+                    const moveKey = `${p1.r},${p1.c}-${p2.r},${p2.c}`;
+                    if (!uniqueMoveKeys.has(moveKey)) {
+                        uniqueMoveKeys.add(moveKey);
+                        internalMoves.push({start: startDot, end: end});
+                    }
+                });
+            }
+            return internalMoves;
+        }
+        function analyzeAllRegions(boardState, linesToCheck) {
+            memo = {};
+            const emptyDots = [];
+            for (let r=0; r<currentGridSize; r++) for (let c=0; c<currentGridSize; c++) if (boardState[r][c] === EMPTY) emptyDots.push({r,c});
+            if (emptyDots.length === 0) return [];
+            const emptyRegions = findConnectedComponentsOfIslandCandidates_param(emptyDots);
+            
+            return emptyRegions.map(component => {
+                const capacity = calculateRegionGameValue(component, boardState, linesToCheck);
+                return { component, capacity };
+            });
+        }
+        function analyzeCurrentPosition() {
+            if (isGameOver) { trainingAnalysisElement.innerHTML = ""; return; }
+            const scoredMoves = getAllScoredMoves(currentPlayer, boardDots, linesDrawn);
+            if (scoredMoves.length === 0) { trainingAnalysisElement.innerHTML = ""; return; }
+            scoredMoves.sort((a, b) => b.yield - a.yield);
+            const highestYield = scoredMoves[0].yield;
+            if (highestYield === 0) { trainingAnalysisElement.innerHTML = ""; return; }
+            const movesWithHighestYield = scoredMoves.filter(m => m.yield === highestYield);
+            let analysisHTML = `<p>There are ${movesWithHighestYield.length} lines yielding ${highestYield} islands.</p>`;
+            const remainingMoves = scoredMoves.filter(m => m.yield < highestYield);
+            if (remainingMoves.length > 0) {
+                const secondHighestYield = remainingMoves[0].yield;
+                 if (secondHighestYield > 0) {
+                    const movesWithSecondHighestYield = remainingMoves.filter(m => m.yield === secondHighestYield);
+                    analysisHTML += `<p>And, there are ${movesWithSecondHighestYield.length} lines yielding ${secondHighestYield} islands.</p>`;
+                }
+            }
+            trainingAnalysisElement.innerHTML = analysisHTML;
+        }
+        function getAllScoredMoves(player, boardState, linesToCheck) {
+             let possibleMoves = [];
+             let uniqueMoveKeys = new Set();
+            for (let r=0; r<currentGridSize; r++) for(let c=0; c<currentGridSize; c++) if (boardState[r][c] === EMPTY) {
+                const start = {r, c};
+                const ends = calculatePotentialEndDots_param(start, boardState, linesToCheck); 
+                ends.forEach(end => {
+                    let p1 = start; let p2 = end;
+                    if (p1.r > p2.r || (p1.r === p2.r && p1.c > p2.c)) { [p1, p2] = [p2, p1]; }
+                    const moveKey = `${p1.r},${p1.c}-${p2.r},${p2.c}`;
+                    if (!uniqueMoveKeys.has(moveKey)) {
+                        uniqueMoveKeys.add(moveKey);
+                        possibleMoves.push({start: start, end: end});
+                    }
+                });
+            }
+            let scoredMoves = [];
+            for (const move of possibleMoves) {
+                let tempBoard = boardState.map(row => [...row]);
+                const line = {start:move.start, end:move.end, player:player};
+                getDotsOnLine(move.start, move.end).forEach(d => tempBoard[d.r][d.c] = player);
+                let pts = 0; const candidates = [];
+                for(let r=0;r<currentGridSize;r++) for(let c=0;c<currentGridSize;c++) if(tempBoard[r][c]===EMPTY) if(!canLinePassThroughDot_param(r,c, tempBoard, [...linesToCheck, line])) candidates.push({r,c});
+                if(candidates.length>0) findConnectedComponentsOfIslandCandidates_param(candidates).forEach(comp => pts += comp.length);
+                scoredMoves.push({move:move, yield:pts});
+            }
+            return scoredMoves;
+        }
+        function makeAIMove() {
+            let chosenMove;
+            const vacantSites = boardDots.flat().filter(d => d === EMPTY).length;
+            const endgameThreshold = 8 * currentMinLineLength;
+            if (currentPlayMode === 'battle' && vacantSites <= endgameThreshold) {
+                const regions = analyzeAllRegions(boardDots, linesDrawn);
+                const singleLineRegions = regions.filter(r => r.capacity === 1);
+                const multiLineRegions = regions.filter(r => r.capacity > 1);
+                const S = singleLineRegions.length;
+                if (S % 2 !== 0) { 
+                    if(singleLineRegions.length > 0) chosenMove = singleLineRegions[0].moves[0];
+                    else if(multiLineRegions.length > 0) chosenMove = multiLineRegions[0].moves[0];
+                } else {
+                    let parityPassingMoveFound = false;
+                    for (const region of multiLineRegions) {
+                        for (const move of region.moves) {
+                            let tempBoard = boardDots.map(r => [...r]);
+                            const line = {start:move.start, end:move.end, player:AI_PLAYER_ID};
+                            getDotsOnLine(move.start, move.end).forEach(d => tempBoard[d.r][d.c] = AI_PLAYER_ID);
+                            const remainingMovesInRegion = analyzeAllRegions(tempBoard, [...linesDrawn, line]).find(r => r.component.some(d => d.r === region.component[0].r && d.c === region.component[0].c))?.capacity || 0;
+                            if (remainingMovesInRegion > 0) { chosenMove = move; parityPassingMoveFound = true; break; }
+                        }
+                        if (parityPassingMoveFound) break;
+                    }
+                    if (!parityPassingMoveFound) {
+                        if(singleLineRegions.length > 0) chosenMove = singleLineRegions[0].moves[0];
+                        else if (multiLineRegions.length > 0) chosenMove = multiLineRegions[0].moves[0];
+                    }
+                }
+            }
+            if (!chosenMove) { 
+                const scoredMoves = getAllScoredMoves(AI_PLAYER_ID, boardDots, linesDrawn);
+                if (scoredMoves.length === 0) { console.warn("AI has no moves."); canvas.style.cursor = 'pointer'; return; }
+                scoredMoves.sort((a, b) => b.yield - a.yield); 
+                let bestYield = scoredMoves[0].yield;
+                if (bestYield > 0) {
+                    const bestMoves = scoredMoves.filter(m => m.yield === bestYield);
+                    chosenMove = bestMoves[Math.floor(Math.random() * bestMoves.length)].move;
+                } else { 
+                    chosenMove = scoredMoves[Math.floor(Math.random() * scoredMoves.length)].move;
+                }
+            }
+            setTimeout(() => { if (isGameOver) return; makeMove(chosenMove.start, chosenMove.end); }, 300); 
+        }
+
+        function areMovesPossible() {
+            for (let r=0; r<currentGridSize; r++) for (let c=0; c<currentGridSize; c++) if (boardDots[r][c] === EMPTY) {
+                if (calculatePotentialEndDots_param({r,c}, boardDots, linesDrawn).length > 0) return true;
+            } return false;
+        }
+        function announceWinner() {
+            isGameOver = true; gameInProgress = false;
+            let finalScores = [];
+            for(let i=1; i<=currentNumberOfPlayers; i++) { finalScores.push({player: i, score: playerScores[i]}); }
+            finalScores.sort((a,b) => b.score - a.score);
+            let winnerMessage = "Game Over! ";
+            if (finalScores.length > 0 && finalScores[0].score > (finalScores[1]?.score ?? -Infinity)) {
+                winnerMessage += `${PLAYER_COLORS[finalScores[0].player].name} wins!`;
+            } else {
+                const topScore = finalScores[0]?.score ?? 0;
+                const winners = finalScores.filter(s => s.score === topScore);
+                const winnerNames = winners.map(w => PLAYER_COLORS[w.player].name).join(' & ');
+                winnerMessage += `It's a Draw between ${winnerNames}!`;
+            }
+            gameInfoElement.textContent=winnerMessage; 
+            aiMoveButton.classList.add('hidden');
+            setConfigButtonsDisabledState(false); canvas.style.cursor = 'default';
+        }
+
+        function makeMove(startDot, endDot) { 
+            lastMoveInfoElement.textContent = ""; 
+            const playerMakingMove = currentPlayer; 
+            const line = { start: startDot, end: endDot, player: playerMakingMove };
+            linesDrawn.push(line);
+            const path = getDotsOnLine(startDot, endDot);
+            const lineOwnerState = playerMakingMove;
+            path.forEach(dot => { boardDots[dot.r][dot.c] = lineOwnerState; });
+            detectAndScoreIslands_MAIN(playerMakingMove); 
+            selectedStartDot = null; potentialEndDots = [];
+            redrawBoard(); updateScores();
+            if (!areMovesPossible()) {
+                const bonus = 3 * currentMinLineLength; playerScores[playerMakingMove] += bonus;
+                lastMoveInfoElement.textContent = `${PLAYER_COLORS[playerMakingMove].name} gets ${bonus} bonus (last move)! ` + lastMoveInfoElement.textContent.replace(/ scored \d+ island points!/, "");
+                updateScores(); announceWinner(); redrawBoard(); 
+            } else {
+                switchPlayer(); 
+            }
+        }
+        
+        function handleCanvasClick(event) { 
+            if (isGameOver || (currentGameMode === 'ai' && currentPlayer === AI_PLAYER_ID)) return; 
+            const rect = canvas.getBoundingClientRect();
+            const x = event.clientX - rect.left; const y = event.clientY - rect.top;
+            const c_click = Math.floor(x / CELL_SIZE); const r_click = Math.floor(y / CELL_SIZE);
+            if (r_click<0||r_click>=currentGridSize||c_click<0||c_click>=currentGridSize) return;
+            if (!selectedStartDot) {
+                if(boardDots[r_click][c_click]===EMPTY){selectedStartDot={r:r_click,c:c_click};potentialEndDots=calculatePotentialEndDots_param(selectedStartDot,boardDots,linesDrawn);lastMoveInfoElement.textContent="";}
+            } else {
+                const clickedEnd = potentialEndDots.find(d=>d.r===r_click&&d.c===c_click);
+                if(clickedEnd){makeMove(selectedStartDot,clickedEnd);}
+                else if(boardDots[r_click][c_click]===EMPTY&&!(r_click===selectedStartDot.r&&c_click===selectedStartDot.c)){selectedStartDot={r:r_click,c:c_click};potentialEndDots=calculatePotentialEndDots_param(selectedStartDot,boardDots,linesDrawn);lastMoveInfoElement.textContent="";}
+                else{selectedStartDot=null;potentialEndDots=[];lastMoveInfoElement.textContent="";}
+            }
+            redrawBoard(); 
+            if (!isGameOver) updateGameInfo(); 
+        }
+
+        function switchPlayer() { 
+            currentPlayer++;
+            if (currentPlayer > currentNumberOfPlayers) { currentPlayer = 1; }
+            aiMoveButton.classList.add('hidden');
+            lastAnalysisResult = []; trainingAnalysisElement.innerHTML = "";
+            if (!isGameOver) { 
+                updateGameInfo();
+                if (currentPlayMode === 'training') {
+                    lastAnalysisResult = analyzeAllRegions(boardDots, linesDrawn);
+                    analyzeCurrentPosition();
+                    redrawBoard();
+                }
+                if (currentGameMode === 'ai' && currentPlayer === AI_PLAYER_ID) {
+                    if (currentPlayMode === 'battle') {
+                        canvas.style.cursor = 'wait'; gameInfoElement.textContent = `AI (${PLAYER_COLORS[AI_PLAYER_ID].name}) is thinking...`;
+                        setTimeout(makeAIMove, 300); 
+                    } else { 
+                        canvas.style.cursor = 'default'; gameInfoElement.textContent = `AI (${PLAYER_COLORS[AI_PLAYER_ID].name}) to move.`;
+                        aiMoveButton.classList.remove('hidden');
+                    }
+                } else {
+                    canvas.style.cursor = 'pointer';
+                }
+            }
+        }
+
+        function startGame() {
+            gameInProgress = true;
+            setConfigButtonsDisabledState(true); 
+
+            currentNumberOfPlayers = selectedNumberOfPlayers;
+            currentGridSize = selectedGridSize;
+            currentMinLineLength = selectedMinLineLength;
+            currentPlayMode = (currentNumberOfPlayers > 2) ? 'battle' : selectedPlayMode;
+            currentGameMode = (currentNumberOfPlayers > 2) ? 'human' : selectedGameMode;
+            
+            setupCanvas(); 
+            initializeBoard(); 
+            currentPlayer = 1; 
+            playerScores = {};
+            for (let i = 1; i <= currentNumberOfPlayers; i++) {
+                playerScores[i] = 0;
+            }
+            
+            minLineLengthDisplay.textContent = currentMinLineLength; 
+            updateGameInfo();
+            updateScores();
+            lastMoveInfoElement.textContent = "";
+            trainingAnalysisElement.innerHTML = "";
+            aiMoveButton.classList.add('hidden');
+            lastAnalysisResult = [];
+            
+            redrawBoard(); 
+        }
+        
+        createConfigButtons(); 
+        gameInfoElement.textContent = "Select game settings and click 'Start New Game'.";
+        startGameButton.addEventListener('click', () => {
+             if (gameInProgress && !isGameOver) {
+                confirmationArea.classList.remove('hidden');
+                const handleConfirmation = (event) => {
+                    confirmationArea.classList.add('hidden'); 
+                    if (event.key.toLowerCase() === 'y') {
+                        gameInProgress = false; isGameOver = true; 
+                        setConfigButtonsDisabledState(false); 
+                        gameInfoElement.textContent = "Select game settings and click 'Start New Game'.";
+                        scoreBoardElement.innerHTML = ''; lastMoveInfoElement.textContent = '';
+                        trainingAnalysisElement.innerHTML = '';
+                        ctx.clearRect(0, 0, canvas.width, canvas.height); 
+                    }
+                };
+                window.addEventListener('keydown', handleConfirmation, { once: true });
+            } else {
+                startGame();
+            }
+        });
+        canvas.addEventListener('click', handleCanvasClick); 
+        aiMoveButton.addEventListener('click', () => {
+            if(!isGameOver && currentGameMode === 'ai' && currentPlayer === AI_PLAYER_ID) {
+                aiMoveButton.classList.add('hidden');
+                gameInfoElement.textContent = `AI (${PLAYER_COLORS[AI_PLAYER_ID].name}) is thinking...`;
+                setTimeout(makeAIMove, 100);
+            }
+        });
+    });
+    </script>
+</body>
+</html>
